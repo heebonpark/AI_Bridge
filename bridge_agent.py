@@ -115,16 +115,29 @@ class AIAgent:
 
     # Retry with exponential backoff on exceptions (rate limit, network errors)
     @retry(wait=wait_exponential(multiplier=1, min=2, max=20), stop=stop_after_attempt(3))
-    def process_prompt(self, prompt):
+    def process_prompt(self, prompt, file_path=None):
         logger.info(f"Generating content with model: {self.config.model_name}...")
         try:
-            response = self.model.generate_content(prompt)
+            input_data = [prompt]
+            uploaded_file = None
+            if file_path and os.path.exists(file_path):
+                logger.info(f"Uploading file to Gemini: {file_path}")
+                uploaded_file = genai.upload_file(file_path)
+                input_data.insert(0, uploaded_file) # Put file before prompt
+                
+            response = self.model.generate_content(input_data)
+            
+            # Cleanup Gemini file if uploaded
+            if uploaded_file:
+                logger.info("Cleaning up uploaded file from Gemini...")
+                genai.delete_file(uploaded_file.name)
+                
             return response.text
         except Exception as e:
             logger.warning(f"AI Generation Error (Retrying...): {e}")
             raise
 
-def run_pipeline():
+def run_pipeline(prompt_text=None, file_path=None):
     logger.info("=== AI Bridge Agent Execution Started ===")
     
     # 1. Configuration Check
@@ -139,22 +152,24 @@ def run_pipeline():
     git_manager.sync_pull()
 
     # 3. Read Input
-    input_file = os.path.join(REPO_PATH, "input.txt")
-    if not os.path.exists(input_file):
-        raise FileNotFoundError(f"Input file not found: {input_file}")
-
-    with open(input_file, "r", encoding="utf-8") as f:
-        prompt = f.read().strip()
-    
+    prompt = prompt_text
     if not prompt:
-        raise ValueError("Input file is empty. Exiting.")
+        input_file = os.path.join(REPO_PATH, "input.txt")
+        if not os.path.exists(input_file):
+            raise FileNotFoundError(f"Input file not found: {input_file}")
+
+        with open(input_file, "r", encoding="utf-8") as f:
+            prompt = f.read().strip()
+        
+        if not prompt:
+            raise ValueError("Input file is empty. Exiting.")
 
     logger.info(f"Input prompt length: {len(prompt)} chars")
 
     # 4. Process AI
     yield "🧠 AI 응답 생성 중..."
     try:
-        result_text = ai_agent.process_prompt(prompt)
+        result_text = ai_agent.process_prompt(prompt, file_path)
         logger.info("AI Processing completed successfully.")
     except Exception as e:
         logger.error(f"AI Processing failed completely after retries: {e}")

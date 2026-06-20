@@ -92,6 +92,23 @@ st.sidebar.info("- **모델:** gemini-2.5-flash\n- **역할:** Data Intel PRO\n-
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 💾 데이터 내보내기")
+if st.session_state.chat_history:
+    chat_text = ""
+    for chat in st.session_state.chat_history:
+        role = "나" if chat['role'] == 'user' else "AI Bridge"
+        chat_text += f"[{role}]\n{chat['content']}\n\n"
+    st.sidebar.download_button(
+        label="📥 전체 대화 내용 다운로드 (TXT)",
+        data=chat_text,
+        file_name="chat_history.txt",
+        mime="text/plain",
+        use_container_width=True
+    )
+else:
+    st.sidebar.info("대화 내역이 없습니다.")
+
 def get_custom_css(t):
     return f"""
     <style>
@@ -207,40 +224,57 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # Chat History Display
 if st.session_state.chat_history:
-    for chat in st.session_state.chat_history:
+    for i, chat in enumerate(st.session_state.chat_history):
         if chat['role'] == 'user':
             st.markdown(f"<div class='chat-bubble-user'>👤 <b>나:</b><br><br>{chat['content']}</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div class='chat-bubble-ai'>🤖 <b>AI Bridge:</b><br><br>{chat['content']}</div>", unsafe_allow_html=True)
+            # Add download button for the latest AI response
+            if i == len(st.session_state.chat_history) - 1:
+                col1, col2 = st.columns([8, 2])
+                with col2:
+                    st.download_button(
+                        label="📥 이 답변만 다운로드",
+                        data=chat['content'],
+                        file_name="ai_response.txt",
+                        mime="text/plain",
+                        key=f"download_{i}",
+                        use_container_width=True
+                    )
 else:
     st.info("아직 대화 기록이 없습니다. 아래 입력창에 첫 번째 질문을 남겨주세요!")
 
 # Input Box at the bottom
 st.markdown('<div class="glass-container">', unsafe_allow_html=True)
-prompt = st.text_area("어떤 도움이 필요하신가요?", height=100, placeholder="예: 오늘 서울 날씨 알려줘, 또는 이 데이터에서 이상치를 찾아줘...")
+uploaded_file = st.file_uploader("📎 파일 또는 이미지 첨부 (멀티모달 분석용)", type=["png", "jpg", "jpeg", "pdf", "csv", "txt", "xlsx"])
+prompt = st.text_area("어떤 도움이 필요하신가요?", height=100, placeholder="예: 첨부된 영수증 이미지를 분석해줘, 또는 오늘 날씨를 알려줘...")
 
 if st.button("🚀 AI 에이전트 실행"):
-    if not prompt.strip():
-        st.warning("질문을 입력해주세요.")
+    if not prompt.strip() and not uploaded_file:
+        st.warning("질문을 입력하거나 파일을 첨부해주세요.")
     else:
         # Save user prompt to history
-        st.session_state.chat_history.append({'role': 'user', 'content': prompt})
+        user_msg = prompt
+        if uploaded_file:
+            user_msg = f"*(첨부파일: {uploaded_file.name})*\n\n" + user_msg
+        st.session_state.chat_history.append({'role': 'user', 'content': user_msg})
         
-        # Save prompt to input.txt
-        try:
-            with open("input.txt", "w", encoding="utf-8") as f:
-                f.write(prompt)
-        except Exception as e:
-            st.error(f"입력 파일 저장 실패: {e}")
-            st.stop()
-            
+        # Handle file upload to temporary local directory
+        temp_file_path = None
+        if uploaded_file:
+            temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
+            os.makedirs(temp_dir, exist_ok=True)
+            temp_file_path = os.path.join(temp_dir, uploaded_file.name)
+            with open(temp_file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+        
         # Run Pipeline
         import bridge_agent
         
         with st.status("AI Bridge 실행 중...", expanded=True) as status:
             try:
                 result = None
-                pipeline = bridge_agent.run_pipeline()
+                pipeline = bridge_agent.run_pipeline(prompt_text=prompt, file_path=temp_file_path)
                 for step in pipeline:
                     if step.startswith("🔄") or step.startswith("🧠") or step.startswith("💾") or step.startswith("🚀"):
                         st.write(step)
@@ -248,6 +282,10 @@ if st.button("🚀 AI 에이전트 실행"):
                         result = step
                 
                 status.update(label="실행 완료!", state="complete", expanded=False)
+                
+                # Cleanup temp file
+                if temp_file_path and os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
                 
                 # Save AI response to history
                 st.session_state.chat_history.append({'role': 'ai', 'content': result})
@@ -258,5 +296,7 @@ if st.button("🚀 AI 에이전트 실행"):
             except Exception as e:
                 status.update(label="오류 발생", state="error", expanded=True)
                 st.error(f"실행 중 오류가 발생했습니다: {e}")
+                if temp_file_path and os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
 
 st.markdown('</div>', unsafe_allow_html=True)
