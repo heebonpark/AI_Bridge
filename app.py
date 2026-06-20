@@ -262,9 +262,15 @@ if st.button("🚀 AI 에이전트 실행"):
         # Handle file upload to temporary local directory
         temp_file_path = None
         if uploaded_file:
+            import uuid
             temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
             os.makedirs(temp_dir, exist_ok=True)
-            temp_file_path = os.path.join(temp_dir, uploaded_file.name)
+            
+            # Use safe ASCII filename to prevent UnicodeEncodeError in google-genai SDK
+            _, ext = os.path.splitext(uploaded_file.name)
+            safe_filename = f"upload_{uuid.uuid4().hex}{ext}"
+            temp_file_path = os.path.join(temp_dir, safe_filename)
+            
             with open(temp_file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
         
