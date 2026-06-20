@@ -164,16 +164,16 @@ def get_custom_css(t):
         }}
         
         /* Text Area */
-        .stTextArea textarea {
+        .stTextArea textarea {{
             background-color: {t['input_bg']} !important;
             color: {t['text_color']} !important;
             border: 1px solid {t['input_border']} !important;
             border-radius: 12px !important;
-        }
-        .stTextArea textarea:focus {
+        }}
+        .stTextArea textarea:focus {{
             border-color: {t['input_focus']} !important;
             box-shadow: 0 0 0 2px {t['btn_hover']} !important;
-        }
+        }}
         
         /* Mobile Optimization */
         @media (max-width: 768px) {{
