@@ -176,23 +176,23 @@ def get_custom_css(t):
         }
         
         /* Mobile Optimization */
-        @media (max-width: 768px) {
-            .glass-container {
+        @media (max-width: 768px) {{
+            .glass-container {{
                 padding: 1rem;
                 margin-bottom: 1rem;
                 border-radius: 12px;
-            }
-            .chat-bubble-user, .chat-bubble-ai {
+            }}
+            .chat-bubble-user, .chat-bubble-ai {{
                 padding: 1rem;
                 font-size: 0.95rem;
-            }
-            .stButton>button {
+            }}
+            .stButton>button {{
                 padding: 0.6rem 1rem;
-            }
-            h1 {
+            }}
+            h1 {{
                 font-size: 1.8rem !important;
-            }
-        }
+            }}
+        }}
     </style>
     """
 
