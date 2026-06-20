@@ -1,78 +1,191 @@
 import os
+import sys
 import subprocess
+import logging
+import datetime
+import warnings
+from dotenv import load_dotenv
+from tenacity import retry, wait_exponential, stop_after_attempt
+
+# Suppress google.generativeai deprecation warning (to keep console clean)
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
 import google.generativeai as genai
 
-# 현재 스크립트가 위치한 디렉토리를 REPO_PATH로 자동 설정
+# --- Configuration & Setup ---
 REPO_PATH = os.path.dirname(os.path.abspath(__file__))
-API_KEY = os.getenv("GEMINI_API_KEY")
 
-def run_command(command):
-    """쉘 명령어를 실행하고 결과를 반환하는 헬퍼 함수"""
-    print(f"[실행] {command}")
-    result = subprocess.run(command, cwd=REPO_PATH, shell=True, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"⚠️ 명령어 실행 오류 ({command}):")
-        print(result.stderr.strip())
-    else:
-        if result.stdout.strip():
-            print(result.stdout.strip())
-    return result
+def setup_logging():
+    log_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s - %(message)s')
+    logger = logging.getLogger("AIBridge")
+    logger.setLevel(logging.INFO)
+    
+    # File Handler
+    file_handler = logging.FileHandler(os.path.join(REPO_PATH, "bridge_agent.log"), encoding='utf-8')
+    file_handler.setFormatter(log_formatter)
+    logger.addHandler(file_handler)
+    
+    # Console Handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(log_formatter)
+    logger.addHandler(console_handler)
+    
+    return logger
 
-def main():
-    if not API_KEY:
-        print("❌ Error: 'GEMINI_API_KEY' 환경 변수가 설정되어 있지 않습니다.")
-        print("실행 전에 'export GEMINI_API_KEY=당신의키' 명령어를 입력해주세요.")
-        return
+logger = setup_logging()
 
-    # Gemini 모델 초기화
-    genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-pro') # 필요시 gemini-1.5-pro-latest 등으로 변경 가능
+class ConfigManager:
+    """Manages environment variables and settings."""
+    def __init__(self):
+        # Load from .env file if present
+        load_dotenv(os.path.join(REPO_PATH, ".env"))
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.model_name = os.getenv("MODEL_NAME", "gemini-2.5-flash")
+        self.temperature = float(os.getenv("TEMPERATURE", "0.7"))
+        self.max_tokens = int(os.getenv("MAX_OUTPUT_TOKENS", "8192"))
+        self.system_instruction = os.getenv("SYSTEM_INSTRUCTION", "당신은 친절하고 유능한 AI 어시스턴트입니다. 사용자의 질문에 정확하고 명쾌하게 답변해주세요.")
+        
+    def validate(self):
+        if not self.api_key:
+            logger.error("GEMINI_API_KEY is not set in environment or .env file.")
+            sys.exit(1)
 
-    print("--- 🔄 Git 동기화 시작 ---")
-    run_command("git pull origin main")
+class GitManager:
+    """Handles all Git related operations."""
+    def __init__(self, repo_path):
+        self.repo_path = repo_path
 
-    # 질문 읽기
+    def run_command(self, command, timeout=30):
+        logger.info(f"Executing Git Command: {command}")
+        try:
+            result = subprocess.run(command, cwd=self.repo_path, shell=True, capture_output=True, text=True, timeout=timeout)
+            if result.returncode != 0:
+                logger.error(f"Git Command Failed: {command}\n{result.stderr.strip()}")
+            else:
+                output = result.stdout.strip()
+                if output:
+                    logger.info(output)
+            return result
+        except subprocess.TimeoutExpired:
+            logger.error(f"Command timed out after {timeout}s: {command}")
+            return None
+
+    def sync_pull(self):
+        logger.info("Starting Git Sync (Pull)")
+        self.run_command("git fetch origin")
+        # Ensure we can pull without conflict (stash changes just in case)
+        stash_result = self.run_command("git stash")
+        pull_result = self.run_command("git pull --rebase origin main")
+        if stash_result and "No local changes to save" not in stash_result.stdout:
+            self.run_command("git stash pop")
+        return pull_result
+
+    def commit_and_push(self, file_path, message="🤖 AI processed answer [skip ci]"):
+        logger.info("Starting Git Upload (Push)")
+        self.run_command(f"git add {file_path}")
+        status = self.run_command("git status --porcelain")
+        if status and status.stdout.strip():
+            self.run_command(f'git commit -m "{message}"')
+            push_result = self.run_command("git push origin main")
+            if push_result and push_result.returncode == 0:
+                logger.info("Successfully pushed to GitHub.")
+            else:
+                logger.warning("Failed to push to GitHub (Expected in Cloud environment without PAT).")
+        else:
+            logger.info("No changes detected to commit.")
+
+class AIAgent:
+    """Handles Gemini AI operations with retry and config."""
+    def __init__(self, config):
+        self.config = config
+        genai.configure(api_key=self.config.api_key)
+        
+        # System instruction to set persona
+        system_instruction = self.config.system_instruction
+        
+        generation_config = genai.types.GenerationConfig(
+            temperature=self.config.temperature,
+            max_output_tokens=self.config.max_tokens,
+        )
+        
+        self.model = genai.GenerativeModel(
+            model_name=self.config.model_name,
+            system_instruction=system_instruction,
+            generation_config=generation_config
+        )
+
+    # Retry with exponential backoff on exceptions (rate limit, network errors)
+    @retry(wait=wait_exponential(multiplier=1, min=2, max=20), stop=stop_after_attempt(3))
+    def process_prompt(self, prompt):
+        logger.info(f"Generating content with model: {self.config.model_name}...")
+        try:
+            response = self.model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            logger.warning(f"AI Generation Error (Retrying...): {e}")
+            raise
+
+def run_pipeline():
+    logger.info("=== AI Bridge Agent Execution Started ===")
+    
+    # 1. Configuration Check
+    config = ConfigManager()
+    config.validate()
+
+    git_manager = GitManager(REPO_PATH)
+    ai_agent = AIAgent(config)
+
+    # 2. Git Pull (Sync)
+    yield "🔄 GitHub 동기화 중 (Pull)..."
+    git_manager.sync_pull()
+
+    # 3. Read Input
     input_file = os.path.join(REPO_PATH, "input.txt")
     if not os.path.exists(input_file):
-        print(f"❌ Error: 입력 파일이 없습니다 ({input_file})")
-        return
+        raise FileNotFoundError(f"Input file not found: {input_file}")
 
     with open(input_file, "r", encoding="utf-8") as f:
         prompt = f.read().strip()
     
     if not prompt:
-        print("⚠️ 질문(input.txt)이 비어있습니다. 종료합니다.")
-        return
+        raise ValueError("Input file is empty. Exiting.")
 
-    # AI 처리
-    print(f"\n--- 🧠 AI 처리 중 ---")
-    print(f"질문 내용: {prompt[:50]}{'...' if len(prompt) > 50 else ''}")
-    
+    logger.info(f"Input prompt length: {len(prompt)} chars")
+
+    # 4. Process AI
+    yield "🧠 AI 응답 생성 중..."
     try:
-        response = model.generate_content(prompt)
-        output_text = response.text
+        result_text = ai_agent.process_prompt(prompt)
+        logger.info("AI Processing completed successfully.")
     except Exception as e:
-        print(f"❌ AI 처리 중 예외 발생: {e}")
-        return
-    
-    # 결과 저장
+        logger.error(f"AI Processing failed completely after retries: {e}")
+        raise e
+
+    # 5. Save Output
+    yield "💾 결과 파일 저장 중..."
     output_file = os.path.join(REPO_PATH, "output.txt")
     with open(output_file, "w", encoding="utf-8") as f:
-        f.write(output_text)
-    print(f"✅ 결과 저장 완료: output.txt (길이: {len(output_text)} 자)")
+        f.write(result_text)
     
-    # 자동 푸시
-    print("\n--- 🚀 GitHub 업로드 중 ---")
-    run_command("git add output.txt")
-    
-    # 변경사항이 있는지 확인 후 커밋
-    status = run_command("git status --porcelain")
-    if "output.txt" in status.stdout:
-        run_command('git commit -m "🤖 AI processed answer [skip ci]"')
-        run_command("git push origin main")
-        print("🎉 완료: 결과가 GitHub에 성공적으로 업로드되었습니다.")
-    else:
-        print("ℹ️ 변경사항이 없어 커밋하지 않았습니다.")
+    # Optional: Save history with timestamp
+    outputs_dir = os.path.join(REPO_PATH, "outputs")
+    os.makedirs(outputs_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    history_file = os.path.join(outputs_dir, f"output_{timestamp}.txt")
+    with open(history_file, "w", encoding="utf-8") as f:
+        f.write(result_text)
+        
+    logger.info(f"Results saved to {output_file} and {history_file}")
+
+    # 6. Git Push
+    yield "🚀 GitHub 업로드 중 (Push)..."
+    git_manager.commit_and_push("output.txt outputs/")
+    logger.info("=== AI Bridge Agent Execution Finished ===")
+    yield result_text
 
 if __name__ == "__main__":
-    main()
+    # 터미널 단독 실행 지원 (제너레이터 소진)
+    for step in run_pipeline():
+        if not step.startswith("🔄") and not step.startswith("🧠") and not step.startswith("💾") and not step.startswith("🚀"):
+            pass # 마지막 결과 반환값은 여기서 무시
+        else:
+            print(step)
