@@ -270,6 +270,8 @@ if st.button("🚀 AI 에이전트 실행"):
         
         # Run Pipeline
         import bridge_agent
+        import importlib
+        importlib.reload(bridge_agent)
         
         with st.status("AI Bridge 실행 중...", expanded=True) as status:
             try:
