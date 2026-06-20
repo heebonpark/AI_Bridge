@@ -48,7 +48,7 @@ class ConfigManager:
     def validate(self):
         if not self.api_key:
             logger.error("GEMINI_API_KEY is not set in environment or .env file.")
-            sys.exit(1)
+            raise ValueError("GEMINI_API_KEY가 설정되지 않았습니다. Streamlit Cloud의 Secrets 설정에 API 키를 등록해주세요.")
 
 class GitManager:
     """Handles all Git related operations."""
@@ -58,7 +58,9 @@ class GitManager:
     def run_command(self, command, timeout=30):
         logger.info(f"Executing Git Command: {command}")
         try:
-            result = subprocess.run(command, cwd=self.repo_path, shell=True, capture_output=True, text=True, timeout=timeout)
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            result = subprocess.run(command, cwd=self.repo_path, shell=True, capture_output=True, text=True, timeout=timeout, env=env)
             if result.returncode != 0:
                 logger.error(f"Git Command Failed: {command}\n{result.stderr.strip()}")
             else:
