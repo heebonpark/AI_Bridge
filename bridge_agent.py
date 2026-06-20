@@ -36,8 +36,8 @@ logger = setup_logging()
 class ConfigManager:
     """Manages environment variables and settings."""
     def __init__(self):
-        # Load from .env file if present
-        load_dotenv(os.path.join(REPO_PATH, ".env"))
+        # Load from .env file if present (override=True ensures hot-reloading new API keys)
+        load_dotenv(os.path.join(REPO_PATH, ".env"), override=True)
         self.api_key = os.getenv("GEMINI_API_KEY")
         self.model_name = os.getenv("MODEL_NAME", "gemini-2.5-flash")
         self.temperature = float(os.getenv("TEMPERATURE", "0.7"))
