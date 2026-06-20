@@ -7,9 +7,10 @@ import warnings
 from dotenv import load_dotenv
 from tenacity import retry, wait_exponential, stop_after_attempt
 
-# Suppress google.generativeai deprecation warning (to keep console clean)
-warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
-import google.generativeai as genai
+# Suppress warnings if needed
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+from google import genai
 
 # --- Configuration & Setup ---
 REPO_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -97,21 +98,7 @@ class AIAgent:
     """Handles Gemini AI operations with retry and config."""
     def __init__(self, config):
         self.config = config
-        genai.configure(api_key=self.config.api_key)
-        
-        # System instruction to set persona
-        system_instruction = self.config.system_instruction
-        
-        generation_config = genai.types.GenerationConfig(
-            temperature=self.config.temperature,
-            max_output_tokens=self.config.max_tokens,
-        )
-        
-        self.model = genai.GenerativeModel(
-            model_name=self.config.model_name,
-            system_instruction=system_instruction,
-            generation_config=generation_config
-        )
+        self.client = genai.Client(api_key=self.config.api_key)
 
     # Retry with exponential backoff on exceptions (rate limit, network errors)
     @retry(wait=wait_exponential(multiplier=1, min=2, max=20), stop=stop_after_attempt(3))
@@ -122,15 +109,23 @@ class AIAgent:
             uploaded_file = None
             if file_path and os.path.exists(file_path):
                 logger.info(f"Uploading file to Gemini: {file_path}")
-                uploaded_file = genai.upload_file(file_path)
-                input_data.insert(0, uploaded_file) # Put file before prompt
+                uploaded_file = self.client.files.upload(file=file_path)
+                input_data.append(uploaded_file)
                 
-            response = self.model.generate_content(input_data)
+            response = self.client.models.generate_content(
+                model=self.config.model_name,
+                contents=input_data,
+                config=genai.types.GenerateContentConfig(
+                    system_instruction=self.config.system_instruction,
+                    temperature=self.config.temperature,
+                    max_output_tokens=self.config.max_tokens,
+                )
+            )
             
             # Cleanup Gemini file if uploaded
             if uploaded_file:
                 logger.info("Cleaning up uploaded file from Gemini...")
-                genai.delete_file(uploaded_file.name)
+                self.client.files.delete(name=uploaded_file.name)
                 
             return response.text
         except Exception as e:
