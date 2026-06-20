@@ -1,0 +1,3 @@
+@echo off
+python /Users/heebonpark/Downloads/AI_Bridge\bridge_agent.py
+pause
