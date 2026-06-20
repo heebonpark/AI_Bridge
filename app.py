@@ -261,6 +261,8 @@ if st.button("🚀 AI 에이전트 실행"):
         
         # Handle file upload to temporary local directory
         temp_file_path = None
+        is_data_file = False
+        ml_results = None
         if uploaded_file:
             import uuid
             temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
@@ -268,11 +270,29 @@ if st.button("🚀 AI 에이전트 실행"):
             
             # Use safe ASCII filename to prevent UnicodeEncodeError in google-genai SDK
             _, ext = os.path.splitext(uploaded_file.name)
-            safe_filename = f"upload_{uuid.uuid4().hex}{ext}"
+            ext_lower = ext.lower()
+            safe_filename = f"upload_{uuid.uuid4().hex}{ext_lower}"
             temp_file_path = os.path.join(temp_dir, safe_filename)
             
             with open(temp_file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
+                
+            if ext_lower in ['.csv', '.xlsx']:
+                is_data_file = True
+                try:
+                    from ml_analyzer import MLAnalyzer
+                    st.info("📊 데이터 분석 대시보드를 준비 중입니다...")
+                    analyzer = MLAnalyzer(temp_file_path)
+                    st.dataframe(analyzer.df.head(5), use_container_width=True)
+                    
+                    # Run Anomaly Detection
+                    ml_results = analyzer.run_anomaly_detection()
+                    if ml_results and ml_results.get("fig"):
+                        st.plotly_chart(ml_results["fig"], use_container_width=True)
+                        # Append ML insights to prompt
+                        prompt += f"\n\n[자동 머신러닝 분석 결과]\n{ml_results['report']}\n다음 통계 요약을 바탕으로 이 데이터의 비즈니스 인사이트와 해결책을 제시해줘:\n{analyzer.get_summary_stats()}"
+                except Exception as e:
+                    st.warning(f"ML 자동 분석 중 에러가 발생했습니다: {e}")
         
         # Run Pipeline
         import bridge_agent
