@@ -143,23 +143,36 @@ def get_custom_css(t):
             color: {t['text_color']};
         }}
         
-        /* Chat Bubbles */
+        /* Chat Layout */
+        .chat-row-user {{
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 1rem;
+        }}
+        .chat-row-ai {{
+            display: flex;
+            justify-content: flex-start;
+            margin-bottom: 2rem;
+        }}
         .chat-bubble-user {{
             background: {t['user_bubble']};
             border: 1px solid {t['glass_border']};
-            border-radius: 16px 16px 0px 16px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            text-align: right;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 20px 20px 4px 20px;
+            padding: 1.2rem 1.5rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            max-width: 80%;
+            color: {t['text_color']};
+            line-height: 1.6;
         }}
         .chat-bubble-ai {{
             background: {t['ai_bubble']};
             border: 1px solid {t['glass_border']};
-            border-radius: 16px 16px 16px 0px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 20px 20px 20px 4px;
+            padding: 1.2rem 1.5rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            max-width: 80%;
+            color: {t['text_color']};
+            line-height: 1.6;
         }}
         
         /* Buttons */
@@ -217,18 +230,20 @@ def get_custom_css(t):
 st.markdown(get_custom_css(theme), unsafe_allow_html=True)
 
 # Header
-st.markdown('<div class="glass-container">', unsafe_allow_html=True)
-st.title("✨ AI Bridge")
-st.markdown("**Data Intel PRO** - Premium AI Agent Pipeline", unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
+st.markdown(f'''
+<div class="glass-container" style="text-align: center; padding: 2rem 1rem; margin-top: 1rem;">
+    <h1 style="margin-bottom: 0.5rem; font-size: 2.8rem; font-weight: 800; background: {theme['btn_gradient']}; -webkit-background-clip: text; -webkit-text-fill-color: transparent;">✨ AI Bridge</h1>
+    <p style="margin-top: 0; font-size: 1.1rem; opacity: 0.8;"><b>Data Intel PRO</b> - Premium AI Agent Pipeline</p>
+</div>
+''', unsafe_allow_html=True)
 
 # Chat History Display
 if st.session_state.chat_history:
     for i, chat in enumerate(st.session_state.chat_history):
         if chat['role'] == 'user':
-            st.markdown(f"<div class='chat-bubble-user'>👤 <b>나:</b><br><br>{chat['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='chat-row-user'><div class='chat-bubble-user'>👤 <b>나:</b><br><br>{chat['content']}</div></div>", unsafe_allow_html=True)
         else:
-            st.markdown(f"<div class='chat-bubble-ai'>🤖 <b>AI Bridge:</b><br><br>{chat['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='chat-row-ai'><div class='chat-bubble-ai'>🤖 <b>AI Bridge:</b><br><br>{chat['content']}</div></div>", unsafe_allow_html=True)
             # Add download button for the latest AI response
             if i == len(st.session_state.chat_history) - 1:
                 col1, col2 = st.columns([8, 2])
@@ -244,10 +259,13 @@ if st.session_state.chat_history:
 else:
     st.info("아직 대화 기록이 없습니다. 아래 입력창에 첫 번째 질문을 남겨주세요!")
 
-# Input Box at the bottom
-st.markdown('<div class="glass-container">', unsafe_allow_html=True)
-uploaded_file = st.file_uploader("📎 파일 또는 이미지 첨부 (멀티모달 분석용)", type=["png", "jpg", "jpeg", "pdf", "csv", "txt", "xlsx"])
-prompt = st.text_area("어떤 도움이 필요하신가요?", height=100, placeholder="예: 첨부된 영수증 이미지를 분석해줘, 또는 오늘 날씨를 알려줘...")
+# Input Box at the bottom (Removed broken HTML wrapper)
+st.markdown("---")
+col1, col2 = st.columns([1, 1])
+with col1:
+    uploaded_file = st.file_uploader("📎 파일 또는 이미지 첨부", type=["png", "jpg", "jpeg", "pdf", "csv", "txt", "xlsx"])
+with col2:
+    prompt = st.text_area("어떤 도움이 필요하신가요?", height=68, placeholder="예: 첨부된 영수증 분석, 내일 날씨 확인...")
 
 if st.button("🚀 AI 에이전트 실행"):
     if not prompt.strip() and not uploaded_file:
@@ -326,5 +344,3 @@ if st.button("🚀 AI 에이전트 실행"):
                 st.error(f"실행 중 오류가 발생했습니다: {e}")
                 if temp_file_path and os.path.exists(temp_file_path):
                     os.remove(temp_file_path)
-
-st.markdown('</div>', unsafe_allow_html=True)
